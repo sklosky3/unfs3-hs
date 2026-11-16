@@ -50,8 +50,13 @@ mount -t cifs //127.0.0.1/share /mnt/cifs \
     || { echo "CIFS mount failed (does the kernel have the cifs module?)"; exit 2; }
 rpcbind; sleep 1
 
+# Never leave an NFS mount attached while its server restarts: a mount whose
+# server is gone can block umount. Unmount first, and use soft mounts.
+NFSOPTS=vers=3,proto=tcp,mountproto=tcp,ro,nolock,soft,timeo=50,retrans=2
+nfs_umount() { for m in "$@"; do mountpoint -q "$m" && { timeout 30 umount "$m" || umount -l "$m"; }; done; return 0; }
 start_unfsd() { # mode exports
-    pkill -x unfsd; sleep 1
+    nfs_umount /mnt/nfs /mnt/nfs2
+    pkill -x unfsd; for i in 1 2 3 4 5; do pgrep -x unfsd >/dev/null || break; sleep 1; done
     echo "$2" > /etc/exports.unfsd
     ./unfsd -e /etc/exports.unfsd -t -N "$1" -d > "/tmp/unfsd.$1.log" 2>&1 &
     sleep 2
@@ -60,9 +65,8 @@ links() { stat -c %h "$@" | tr '\n' ' ' | sed 's/ $//'; }
 
 for mode in never auto always; do
     start_unfsd $mode "/mnt/cifs (ro,no_root_squash)"
-    umount /mnt/nfs 2>/dev/null
-    mount -t nfs -o vers=3,proto=tcp,mountproto=tcp,ro,nolock,noac,lookupcache=none \
-        127.0.0.1:/mnt/cifs /mnt/nfs || { echo "NFS mount failed ($mode)"; exit 2; }
+    timeout 60 mount -t nfs -o $NFSOPTS,noac,lookupcache=none \
+        127.0.0.1:/mnt/cifs /mnt/nfs || { echo "NFS mount failed ($mode)"; tail -20 /tmp/unfsd.$mode.log; exit 2; }
     echo 3 > /proc/sys/vm/drop_caches
     ls -f /mnt/cifs/a /mnt/cifs/b > /dev/null      # CIFS learns the names from a listing
     got=$(links /mnt/nfs/a/data.dat /mnt/nfs/a/link-same.dat /mnt/nfs/b/link-other.dat)
@@ -72,18 +76,19 @@ for mode in never auto always; do
     ino=$(stat -c %i /mnt/nfs/a/data.dat /mnt/nfs/a/link-same.dat /mnt/nfs/b/link-other.dat | sort -u | wc -l)
     check "-N $mode: one inode for all names" "1" "$ino"
 done
-umount /mnt/nfs
+nfs_umount /mnt/nfs
 
 # A non-CIFS export: native counts, and auto mode must not call statx
 mkdir -p /srv/local && echo x > /srv/local/f && ln /srv/local/f /srv/local/g
 start_unfsd auto "/srv/local (ro,no_root_squash)"
 mkdir -p /mnt/nfs2
-mount -t nfs -o vers=3,proto=tcp,mountproto=tcp,ro,nolock,noac 127.0.0.1:/srv/local /mnt/nfs2 \
-    || { echo "NFS mount of local export failed"; exit 2; }
+timeout 60 mount -t nfs -o $NFSOPTS,noac 127.0.0.1:/srv/local /mnt/nfs2 \
+    || { echo "NFS mount of local export failed"; tail -20 /tmp/unfsd.auto.log; exit 2; }
 strace -f -e trace=statx -p "$(pgrep -x unfsd)" -o /tmp/statx.trace & sp=$!
 sleep 1; stat /mnt/nfs2/f /mnt/nfs2/g > /dev/null; sleep 1; kill $sp 2>/dev/null; wait $sp 2>/dev/null
 check "local export: native link counts" "2 2" "$(links /mnt/nfs2/f /mnt/nfs2/g)"
 check "local export: no statx calls in auto mode" "0" "$(grep -c 'statx(' /tmp/statx.trace)"
 
+nfs_umount /mnt/nfs2
 [ $fail = 0 ] && echo "ALL PASSED" || echo "SOME TESTS FAILED"
 exit $fail

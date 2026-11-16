@@ -56,15 +56,20 @@ stats() { # print "access hit miss" from the SIGUSR1 log line
     grep "fh entries" "$LOG" | tail -1 | awk '{for(i=1;i<=NF;i++){if($i=="access")a=$(i+1);if($i=="hit")h=$(i+1);if($i=="miss")m=$(i+1)}} END{print a+0, h+0, m+0}'
 }
 
+# Never leave an NFS mount attached while its server restarts (see
+# tests/cifs-nlink): unmount first, and use soft mounts.
+NFSOPTS=vers=3,proto=tcp,mountproto=tcp,ro,nolock,soft,timeo=50,retrans=2
+nfs_umount() { mountpoint -q /mnt/nfs && { timeout 30 umount /mnt/nfs || umount -l /mnt/nfs; }; return 0; }
+stop_unfsd() { nfs_umount; pkill -x unfsd; for i in 1 2 3 4 5; do pgrep -x unfsd >/dev/null || break; sleep 1; done; }
+
 run_case() { # name unfsd-options...
     local name=$1; shift
-    pkill -x unfsd; sleep 1
-    umount /mnt/nfs 2>/dev/null
+    stop_unfsd
     LOG=/tmp/unfsd.$name.log
     ./unfsd -e /etc/exports.unfsd -t -d "$@" > "$LOG" 2>&1 &
     sleep 2
-    mount -t nfs -o vers=3,proto=tcp,mountproto=tcp,ro,nolock 127.0.0.1:/mnt/cifs /mnt/nfs \
-        || { echo "NFS mount failed ($name)"; fail=1; return; }
+    timeout 60 mount -t nfs -o $NFSOPTS 127.0.0.1:/mnt/cifs /mnt/nfs \
+        || { echo "NFS mount failed ($name)"; tail -20 "$LOG"; fail=1; return; }
     find /mnt/nfs -type f | sort > /tmp/list.txt                       # list + lookup
     shuf --random-source=<(yes) /tmp/list.txt > /tmp/shuf.txt         # deterministic shuffle
     read -r a0 h0 m0 < <(stats)
@@ -98,15 +103,16 @@ check "-H 16: unfsd still running" $(pgrep -x unfsd >/dev/null; echo $?) "pid $(
 # duplicate CIFS mount warning
 mkdir -p /mnt/cifs2
 mount -t cifs //127.0.0.1/share /mnt/cifs2 -o $OPTS || { echo "second CIFS mount failed"; exit 2; }
-pkill -x unfsd; sleep 1
+stop_unfsd
 ./unfsd -e /etc/exports.unfsd -t -d > /tmp/unfsd.dup.log 2>&1 &
 sleep 2
 check "duplicate CIFS mount warning logged" $(grep -q "mounted more than once" /tmp/unfsd.dup.log; echo $?) "$(grep -o 'CIFS share [^ ]* is mounted more than once' /tmp/unfsd.dup.log | head -1)"
 umount /mnt/cifs2
-pkill -x unfsd; sleep 1
+stop_unfsd
 ./unfsd -e /etc/exports.unfsd -t -d > /tmp/unfsd.single.log 2>&1 &
 sleep 2
 check "no warning with one mount per share" $(! grep -q "mounted more than once" /tmp/unfsd.single.log; echo $?) "single mount"
 
+stop_unfsd
 [ $fail = 0 ] && echo "ALL PASSED" || echo "SOME TESTS FAILED"
 exit $fail

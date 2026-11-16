@@ -3,11 +3,17 @@ name: Fork checks
 on: [push, pull_request]
 
 jobs:
-  cifs-nlink-test:
+  container-tests:
     # Samba + kernel CIFS client + unfsd + kernel NFS client in a privileged
-    # Rocky Linux 9 container. Needs the cifs, nfs and nfsd filesystems on the
+    # Rocky Linux 9 container. Needs the cifs and nfs filesystems on the
     # runner's kernel.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        test: [cifs-nlink, fh-cache]
+    name: test-${{ matrix.test }}
     steps:
       - uses: actions/checkout@v4
       - name: Load kernel modules
@@ -19,10 +25,11 @@ jobs:
           sudo modprobe nfsd || true
           grep -E 'cifs|nfs' /proc/filesystems
       - name: Run test
-        run: tests/cifs-nlink/run.sh
+        run: timeout 900 tests/${{ matrix.test }}/run.sh
 
   rpm-rocky9:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container: rockylinux:9
     steps:
       - uses: actions/checkout@v4
