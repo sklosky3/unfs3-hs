@@ -136,6 +136,8 @@ GETATTR3res *nfsproc3_getattr_3_svc(GETATTR3args * argp,
     post_op_attr post;
 
     PREP(path, argp->object);
+    if (st_cache_valid)
+        fix_nlink(path, &st_cache);
     post = get_post_cached(rqstp);
 
     result.status = NFS3_OK;
@@ -205,6 +207,7 @@ LOOKUP3res *nfsproc3_lookup_3_svc(LOOKUP3args * argp, struct svc_req * rqstp)
         if (res == -1)
             result.status = lookup_err();
         else {
+            fix_nlink(obj, &buf);
             if (strcmp(argp->what.name, ".") == 0 ||
                 strcmp(argp->what.name, "..") == 0) {
                 fh = fh_comp_ptr(obj, rqstp, 0);

@@ -31,6 +31,78 @@
 #include "user.h"
 #include "Config/exports.h"
 
+#ifdef __linux__
+#define _UNFS3_NLINK_SYNC 1
+#include <fcntl.h>
+#include <sys/vfs.h>
+#include <sys/stat.h>
+#ifndef CIFS_SUPER_MAGIC
+#define CIFS_SUPER_MAGIC 0xFF534D42
+#endif
+#ifndef SMB2_SUPER_MAGIC
+#define SMB2_SUPER_MAGIC 0xFE534D42
+#endif
+#endif
+
+/*
+ * Link count correction for exports on a Linux CIFS (SMB) mount.
+ *
+ * The CIFS client builds inodes from SMB directory-listing data, which
+ * carries no link count, and caches st_nlink=1 until the attribute cache
+ * (actimeo, default 1 s) expires. A hard-linked file then looks like several
+ * unrelated files to NFS clients that LOOKUP names right after a READDIR(PLUS),
+ * for example Hammerspace assimilation, which only treats a name as a hard
+ * link when nlink > 1.
+ *
+ * For a regular file reporting nlink == 1 on a CIFS filesystem, ask the kernel
+ * for a fresh link count with statx(AT_STATX_FORCE_SYNC) (one SMB query).
+ * Directory listings and reads stay cached. Other filesystems are untouched
+ * in the default "auto" mode.
+ */
+int opt_nlink_sync = NLINK_SYNC_AUTO;
+
+#ifdef _UNFS3_NLINK_SYNC
+static int nlink_fs_wanted(const char *path, backend_statstruct *buf)
+{
+    static int have = 0;
+    static uint64 last_dev;
+    static int last_res;
+    struct statfs sf;
+
+    if (opt_nlink_sync == NLINK_SYNC_ALWAYS)
+        return 1;
+    if (have && last_dev == (uint64) buf->st_dev)
+        return last_res;
+    if (statfs(path, &sf) != 0)
+        return 0;
+    last_dev = (uint64) buf->st_dev;
+    last_res = ((unsigned long) sf.f_type == (unsigned long) CIFS_SUPER_MAGIC ||
+                (unsigned long) sf.f_type == (unsigned long) SMB2_SUPER_MAGIC);
+    have = 1;
+    return last_res;
+}
+#endif
+
+void fix_nlink(const char *path, backend_statstruct *buf)
+{
+#ifdef _UNFS3_NLINK_SYNC
+    struct statx sx;
+
+    if (opt_nlink_sync == NLINK_SYNC_NEVER || !path)
+        return;
+    if (!S_ISREG(buf->st_mode) || buf->st_nlink != 1)
+        return;
+    if (!nlink_fs_wanted(path, buf))
+        return;
+    if (statx(AT_FDCWD, path, AT_SYMLINK_NOFOLLOW | AT_STATX_FORCE_SYNC,
+              STATX_NLINK, &sx) == 0 && (sx.stx_mask & STATX_NLINK))
+        buf->st_nlink = sx.stx_nlink;
+#else
+    (void) path;
+    (void) buf;
+#endif
+}
+
 /*
  * check whether stat_cache is for a regular file
  *

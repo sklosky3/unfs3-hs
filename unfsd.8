@@ -95,6 +95,20 @@ will be used. You may need to use this option when running
 .B unfsd
 from a normal user account.
 .TP
+.BI "\-N " "\<mode\>"
+Hard link count correction (Linux only). The Linux CIFS client reports a
+link count of 1 for files it learned about from a directory listing, so
+hard-linked files look like separate files to NFS clients. In mode
+.B auto
+(the default) unfsd asks the kernel for a fresh link count with
+.BR statx (2)
+(AT_STATX_FORCE_SYNC) for regular files that report 1 link, but only when the
+export is on a CIFS or SMB3 mount. Mode
+.B always
+does this on any filesystem and
+.B never
+turns it off.
+.TP
 .BI "\-n " "\<port\>"
 Use the specified port for the NFS service.
 .TP

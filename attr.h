@@ -25,4 +25,11 @@ nfsstat3 atomic_attr(sattr3 sattr);
 
 void fix_dir_times(const char *path, backend_statstruct *buf);
 
+/* link count correction for CIFS-backed exports, see attr.c */
+#define NLINK_SYNC_NEVER  0
+#define NLINK_SYNC_AUTO   1
+#define NLINK_SYNC_ALWAYS 2
+extern int opt_nlink_sync;
+void fix_nlink(const char *path, backend_statstruct *buf);
+
 #endif

@@ -54,6 +54,7 @@
 #include "fd_cache.h"
 #include "user.h"
 #include "daemon.h"
+#include "attr.h"
 #include "backend.h"
 #include "Config/exports.h"
 
@@ -238,7 +239,7 @@ static void remove_pid_file(void)
 static void parse_options(int argc, char **argv)
 {
     int opt = 0;
-    char *optstring = "3bcC:de:hl:m:n:prstTuwi:";
+    char *optstring = "3bcC:de:hl:m:n:N:prstTuwi:";
 
 #if defined(WIN32) || defined(AFS_SUPPORT)
     /* Allways truncate to 32 bits in these cases */
@@ -289,6 +290,7 @@ static void parse_options(int argc, char **argv)
                 printf("\t-c          enable cluster extensions\n");
                 printf("\t-C <path>   set path for cluster extensions\n");
 #endif
+                printf("\t-N <mode>   hard link count correction on CIFS exports: auto (default), always, never\n");
                 printf("\t-n <port>   port to use for NFS service\n");
                 printf("\t-m <port>   port to use for MOUNT service\n");
                 printf
@@ -327,6 +329,19 @@ static void parse_options(int argc, char **argv)
                     exit(1);
                 }
                 break;
+            case 'N':
+                if (strcmp(optarg, "auto") == 0)
+                    opt_nlink_sync = NLINK_SYNC_AUTO;
+                else if (strcmp(optarg, "always") == 0)
+                    opt_nlink_sync = NLINK_SYNC_ALWAYS;
+                else if (strcmp(optarg, "never") == 0)
+                    opt_nlink_sync = NLINK_SYNC_NEVER;
+                else {
+                    fprintf(stderr, "-N needs auto, always or never\n");
+                    exit(1);
+                }
+                break;
+
             case 'n':
                 opt_nfs_port = strtol(optarg, NULL, 10);
                 if (opt_nfs_port == 0) {
