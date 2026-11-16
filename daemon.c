@@ -392,18 +392,17 @@ static void parse_options(int argc, char **argv)
                     exit(1);
                 }
                 break;
-            case 'H':
-                {
-                    char *end;
-                    unsigned long v = strtoul(optarg, &end, 10);
+            case 'H': {
+                char *end;
+                unsigned long v = strtoul(optarg, &end, 10);
 
-                    if (*end != '\0' || v < 16 || v > 1000000000UL) {
-                        fprintf(stderr, "-H needs a number of entries between 16 and 1000000000\n");
-                        exit(1);
-                    }
-                    opt_fh_cache_size = (unsigned int) v;
+                if (*end != '\0' || v < 16 || v > 1000000000UL) {
+                    fprintf(stderr, "-H needs a number of entries between 16 and 1000000000\n");
+                    exit(1);
                 }
-                break;
+                opt_fh_cache_size = (unsigned int) v;
+            }
+            break;
 
             case 'L':
                 opt_fh_cache_learn = TRUE;
