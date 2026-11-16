@@ -9,6 +9,11 @@
 # most handles miss and unfsd falls back to a tree walk; with a large cache
 # and -L they should hit.
 set -u
+# unfsd runs in its own mount namespace (unshare), created before the test
+# mounts its NFS client. Otherwise unfsd can see its own NFS mount: a cache
+# miss walks the tree from "/", the walk can descend into that mount (its
+# root reports the re-exported directory's inode), and the single-threaded
+# server then waits on itself until the soft mount times out.
 NDIRS=${NDIRS:-60}
 NFILES=${NFILES:-100}           # per directory
 fail=0
@@ -66,7 +71,7 @@ run_case() { # name unfsd-options...
     local name=$1; shift
     stop_unfsd
     LOG=/tmp/unfsd.$name.log
-    ./unfsd -e /etc/exports.unfsd -t -d "$@" > "$LOG" 2>&1 &
+    unshare --mount --propagation private ./unfsd -e /etc/exports.unfsd -t -d "$@" > "$LOG" 2>&1 &
     sleep 2
     timeout 60 mount -t nfs -o $NFSOPTS 127.0.0.1:/mnt/cifs /mnt/nfs \
         || { echo "NFS mount failed ($name)"; tail -20 "$LOG"; fail=1; return; }
@@ -104,12 +109,12 @@ check "-H 16: unfsd still running" $(pgrep -x unfsd >/dev/null; echo $?) "pid $(
 mkdir -p /mnt/cifs2
 mount -t cifs //127.0.0.1/share /mnt/cifs2 -o $OPTS || { echo "second CIFS mount failed"; exit 2; }
 stop_unfsd
-./unfsd -e /etc/exports.unfsd -t -d > /tmp/unfsd.dup.log 2>&1 &
+unshare --mount --propagation private ./unfsd -e /etc/exports.unfsd -t -d > /tmp/unfsd.dup.log 2>&1 &
 sleep 2
 check "duplicate CIFS mount warning logged" $(grep -q "mounted more than once" /tmp/unfsd.dup.log; echo $?) "$(grep -o 'CIFS share [^ ]* is mounted more than once' /tmp/unfsd.dup.log | head -1)"
 umount /mnt/cifs2
 stop_unfsd
-./unfsd -e /etc/exports.unfsd -t -d > /tmp/unfsd.single.log 2>&1 &
+unshare --mount --propagation private ./unfsd -e /etc/exports.unfsd -t -d > /tmp/unfsd.single.log 2>&1 &
 sleep 2
 check "no warning with one mount per share" $(! grep -q "mounted more than once" /tmp/unfsd.single.log; echo $?) "single mount"
 

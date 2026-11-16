@@ -9,6 +9,11 @@
 #   -N auto / always  link count 3 on all three names of one file
 #   local export      native link counts, no statx calls added in auto mode
 set -u
+# unfsd runs in its own mount namespace (unshare), created before the test
+# mounts its NFS client. Otherwise unfsd can see its own NFS mount: a cache
+# miss walks the tree from "/", the walk can descend into that mount (its
+# root reports the re-exported directory's inode), and the single-threaded
+# server then waits on itself until the soft mount times out.
 fail=0
 check() { # description expected actual
     if [ "$2" = "$3" ]; then echo "PASS  $1"; else echo "FAIL  $1: expected '$2', got '$3'"; fail=1; fi
@@ -58,7 +63,7 @@ start_unfsd() { # mode exports
     nfs_umount /mnt/nfs /mnt/nfs2
     pkill -x unfsd; for i in 1 2 3 4 5; do pgrep -x unfsd >/dev/null || break; sleep 1; done
     echo "$2" > /etc/exports.unfsd
-    ./unfsd -e /etc/exports.unfsd -t -N "$1" -d > "/tmp/unfsd.$1.log" 2>&1 &
+    unshare --mount --propagation private ./unfsd -e /etc/exports.unfsd -t -N "$1" -d > "/tmp/unfsd.$1.log" 2>&1 &
     sleep 2
 }
 links() { stat -c %h "$@" | tr '\n' ' ' | sed 's/ $//'; }

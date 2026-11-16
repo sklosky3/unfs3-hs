@@ -15,7 +15,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#ifndef WIN32
 #include <syslog.h>
+#endif				       /* WIN32 */
 
 #include "nfs.h"
 #include "fh.h"
