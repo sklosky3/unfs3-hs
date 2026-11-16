@@ -87,6 +87,9 @@ unfsd -t -N auto -H 1000000 -L -e /etc/exports.unfsd
 - `serverino` is required: it makes the NFS fileid equal the SMB file ID.
 - `backupuid=0,backupgid=0` lets the proxy read files whose ACLs exclude
   the mounting account (backup intent).
+- **Do not mount the proxy's own NFS exports on the proxy.** A cache
+  miss walks the tree from `/`; if the walk reaches such a mount,
+  single-threaded unfsd ends up waiting on itself.
 - **Mount each share only once on the proxy.** Identical CIFS mounts of
   one share share a superblock, so they have the same device and inode
   numbers. unfsd resolves file handles that are not in its cache by
