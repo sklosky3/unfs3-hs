@@ -73,6 +73,12 @@ and assimilation tools) misses on most files.
   after a listing: default cache 4,186 misses; `-H 100000 -L` 0 misses;
   `-H 16 -L` (eviction stress) all content correct.
 
+Measured with a real Windows Server SMB share (about 20,000 files, 265
+directories) re-exported to an NFS assimilation client that lists the tree
+and then reads every file by handle: default cache 2m 12s with 50% handle
+misses; `-H 1000000 -L` 50 s with no misses. One run each on a small lab
+tree, not a benchmark.
+
 Sizing: one entry per file the client works on at a time. 1,000,000
 entries take roughly 130 MB with typical path lengths.
 
