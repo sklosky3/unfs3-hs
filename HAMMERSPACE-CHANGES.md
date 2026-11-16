@@ -47,12 +47,41 @@ An alternative that needs no code change is mounting the CIFS share with
 `actimeo=0`, at a much higher cost: every attribute lookup becomes an SMB
 round trip.
 
+## 3. File handle cache (`-H`, `-L`) and duplicate-mount warning
+
+NFS clients address files by handle. unfsd maps handles to paths with a
+cache; a handle that is not cached is resolved by walking the tree from
+`/`, matching a one-byte inode hash per level (`fh_rec` in `fh.c`). Over
+a CIFS mount each step of that walk can be an SMB round trip.
+
+Upstream's cache is a fixed array of 4,096 entries, searched linearly,
+with a 4 KB path buffer per entry. A client that lists a large tree and
+then reads its files by handle in a different order (backup, migration
+and assimilation tools) misses on most files.
+
+- The cache is now a hash table with an LRU list: one-step lookup and
+  eviction. Paths are stored at their real length (about 64 bytes plus
+  the path per entry).
+- `-H <entries>`: cache size. Default 4096, as upstream.
+- `-L`: also cache every name returned by READDIR/READDIRPLUS. Use with a
+  large `-H`.
+- At startup and on SIGHUP, unfsd logs a warning when one CIFS/SMB3 share
+  is mounted more than once (same `//server/share` in `/proc/self/mounts`).
+- `SIGUSR1` logs cache statistics (entries, accesses, hits, misses), as
+  before.
+- Test: `tests/fh-cache/run.sh`. On 6,000 files read back in shuffled order
+  after a listing: default cache 4,186 misses; `-H 100000 -L` 0 misses;
+  `-H 16 -L` (eviction stress) all content correct.
+
+Sizing: one entry per file the client works on at a time. 1,000,000
+entries take roughly 130 MB with typical path lengths.
+
 ## Recommended proxy setup
 
 ```
 mount -t cifs //server/share /export/share \
     -o ro,vers=3.1.1,serverino,backupuid=0,backupgid=0,credentials=/etc/unfsd/share.cred
-unfsd -t -N auto -e /etc/exports.unfsd
+unfsd -t -N auto -H 1000000 -L -e /etc/exports.unfsd
 ```
 
 - `serverino` is required: it makes the NFS fileid equal the SMB file ID.
@@ -68,9 +97,9 @@ unfsd -t -N auto -e /etc/exports.unfsd
 ## Known limitations
 
 - unfsd is single-threaded; every NFS call waits on a CIFS round trip.
-- The file-handle cache holds 4,096 entries (`fh_cache.c`). Misses are
-  resolved by a tree walk from `/` (`fh_rec` in `fh.c`), which is slow on
-  large trees. A larger or configurable cache is planned.
+- A cache miss is still resolved by a tree walk from `/`. On trees much
+  larger than the cache, misses stay expensive; a handle format that
+  records the parent directory would fix that and is under consideration.
 - NFSv3 only, no lock manager (clients mount with `nolock`).
 - Names that are valid on the SMB server but not addressable over SMB
   from Linux, symlinks and alternate data streams are outside what a CIFS

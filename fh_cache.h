@@ -12,6 +12,11 @@ extern int fh_cache_max;
 extern int fh_cache_use;
 extern int fh_cache_hit;
 
+/* cache size (-H) and learning from directory listings (-L) */
+#define FH_CACHE_DEFAULT_SIZE 4096
+extern unsigned int opt_fh_cache_size;
+extern int opt_fh_cache_learn;
+
 void fh_cache_init(void);
 
 char *fh_decomp(nfs_fh3 fh);
@@ -19,6 +24,7 @@ unfs3_fh_t fh_comp(const char *path, struct svc_req *rqstp, int need_dir);
 unfs3_fh_t *fh_comp_ptr(const char *path, struct svc_req *rqstp, int need_dir);
 
 char *fh_cache_add(uint32 dev, uint64 ino, const char *path);
+void fh_cache_learn(uint32 dev, uint64 ino, const char *path);
 void fh_cache_update(nfs_fh3 fh, char *path);
 
 #endif

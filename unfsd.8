@@ -95,6 +95,20 @@ will be used. You may need to use this option when running
 .B unfsd
 from a normal user account.
 .TP
+.BI "\-H " "\<entries\>"
+Size of the file handle cache (default 4096). The cache maps file handles
+to paths. A handle that is not in the cache is resolved by searching the
+directory tree, which is slow on large trees and over network filesystems,
+so size the cache for the number of files clients work on at a time.
+Each entry takes about 64 bytes plus the length of its path.
+.TP
+.B \-L
+Also add every name returned by READDIR and READDIRPLUS to the file handle
+cache. Useful for clients that list a tree and later access its files by
+handle, such as backup, migration and assimilation tools. Use it together
+with a large
+.BR \-H .
+.TP
 .BI "\-N " "\<mode\>"
 Hard link count correction (Linux only). The Linux CIFS client reports a
 link count of 1 for files it learned about from a directory listing, so

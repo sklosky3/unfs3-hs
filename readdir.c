@@ -25,6 +25,7 @@
 #include "Config/exports.h"
 #include "daemon.h"
 #include "error.h"
+#include "fh_cache.h"
 
 /*
  * maximum number of entries in readdir results
@@ -153,6 +154,10 @@ READDIR3res read_dir(const char *path, cookie3 cookie, cookieverf3 verf,
                 backend_closedir(search);
                 return result;
             }
+
+            /* -L: remember <dev,ino> -> path for later file handle lookups */
+            if (strcmp(this->d_name, ".") != 0 && strcmp(this->d_name, "..") != 0)
+                fh_cache_learn(buf.st_dev, buf.st_ino, scratch);
 
             strcpy(&obj[i * NFS_MAXPATHLEN], this->d_name);
 

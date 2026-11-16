@@ -233,13 +233,74 @@ static void remove_pid_file(void)
     }
 }
 
+#ifdef __linux__
+#include <mntent.h>
+/*
+ * Warn about CIFS/SMB3 shares that are mounted more than once. Identical
+ * mounts of one share share a superblock, so they have the same device and
+ * inode numbers; file handle resolution (fh_rec) then searches every copy
+ * and can resolve a handle to a path in the wrong mount.
+ */
+static void check_duplicate_cifs_mounts(void)
+{
+    FILE *f = setmntent("/proc/self/mounts", "r");
+    struct mntent *m;
+    char **seen = NULL, **dirs = NULL;
+    int n = 0, i;
+
+    if (!f)
+        return;
+    while ((m = getmntent(f)) != NULL) {
+        if (strcmp(m->mnt_type, "cifs") != 0 && strcmp(m->mnt_type, "smb3") != 0)
+            continue;
+        for (i = 0; i < n; i++)
+            if (strcmp(seen[i], m->mnt_fsname) == 0) {
+                logmsg(LOG_WARNING,
+                       "CIFS share %s is mounted more than once (%s and %s). "
+                       "File handles may resolve slowly or into the wrong "
+                       "mount; mount each share only once.",
+                       m->mnt_fsname, dirs[i], m->mnt_dir);
+                break;
+            }
+        if (i == n) {
+            char **ns = realloc(seen, (n + 1) * sizeof(char *));
+            char **nd = realloc(dirs, (n + 1) * sizeof(char *));
+
+            if (!ns || !nd) {
+                seen = ns ? ns : seen;
+                dirs = nd ? nd : dirs;
+                break;
+            }
+            seen = ns;
+            dirs = nd;
+            seen[n] = strdup(m->mnt_fsname);
+            dirs[n] = strdup(m->mnt_dir);
+            if (!seen[n] || !dirs[n])
+                break;
+            n++;
+        }
+    }
+    endmntent(f);
+    for (i = 0; i < n; i++) {
+        free(seen[i]);
+        free(dirs[i]);
+    }
+    free(seen);
+    free(dirs);
+}
+#else
+static void check_duplicate_cifs_mounts(void)
+{
+}
+#endif
+
 /*
  * parse command line options
  */
 static void parse_options(int argc, char **argv)
 {
     int opt = 0;
-    char *optstring = "3bcC:de:hl:m:n:N:prstTuwi:";
+    char *optstring = "3bcC:de:hH:l:Lm:n:N:prstTuwi:";
 
 #if defined(WIN32) || defined(AFS_SUPPORT)
     /* Allways truncate to 32 bits in these cases */
@@ -290,6 +351,8 @@ static void parse_options(int argc, char **argv)
                 printf("\t-c          enable cluster extensions\n");
                 printf("\t-C <path>   set path for cluster extensions\n");
 #endif
+                printf("\t-H <entries> file handle cache size (default %d)\n", FH_CACHE_DEFAULT_SIZE);
+                printf("\t-L          also cache names returned by directory listings\n");
                 printf("\t-N <mode>   hard link count correction on CIFS exports: auto (default), always, never\n");
                 printf("\t-n <port>   port to use for NFS service\n");
                 printf("\t-m <port>   port to use for MOUNT service\n");
@@ -329,6 +392,23 @@ static void parse_options(int argc, char **argv)
                     exit(1);
                 }
                 break;
+            case 'H':
+                {
+                    char *end;
+                    unsigned long v = strtoul(optarg, &end, 10);
+
+                    if (*end != '\0' || v < 16 || v > 1000000000UL) {
+                        fprintf(stderr, "-H needs a number of entries between 16 and 1000000000\n");
+                        exit(1);
+                    }
+                    opt_fh_cache_size = (unsigned int) v;
+                }
+                break;
+
+            case 'L':
+                opt_fh_cache_learn = TRUE;
+                break;
+
             case 'N':
                 if (strcmp(optarg, "auto") == 0)
                     opt_nlink_sync = NLINK_SYNC_AUTO;
@@ -395,6 +475,7 @@ void daemon_exit(int error)
     if (error == SIGHUP) {
         get_squash_ids();
         exports_parse();
+        check_duplicate_cifs_mounts();
         return;
     }
 
@@ -1292,6 +1373,7 @@ int main(int argc, char **argv)
         fd_cache_init();
         get_squash_ids();
         exports_parse();
+        check_duplicate_cifs_mounts();
 
         if (opt_detach) {
             close(pipefd[0]);

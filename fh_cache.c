@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <syslog.h>
 
 #include "nfs.h"
 #include "fh.h"
@@ -26,44 +27,56 @@
 #include "Config/exports.h"
 #include "backend.h"
 
-/* number of entries in fh cache */
-#define CACHE_ENTRIES	4096
+/*
+ * The cache maps <dev,ino> to a path. A miss is expensive: fh_decomp_raw()
+ * walks the tree from "/" (see fh_rec() in fh.c), so the cache should hold
+ * the working set of the client. Entries live in a hash table (lookup) and
+ * on an LRU list (eviction); paths are stored at their real length.
+ *
+ * Size: opt_fh_cache_size entries (-H, default 4096 as in earlier versions).
+ * With -L, every name returned by READDIR/READDIRPLUS is added as well,
+ * so a client that lists a tree and later accesses its files by handle
+ * (backup, migration and assimilation tools) finds them in the cache.
+ */
 
-typedef struct {
+typedef struct fhc_ent {
     uint32 dev;			/* device */
     uint64 ino;			/* inode */
-    char path[NFS_MAXPATHLEN];	/* pathname */
-    unsigned int use;		/* last use */
-} unfs3_cache_t;
+    char *path;			/* pathname (malloc'd) */
+    struct fhc_ent *hnext;	/* hash chain */
+    struct fhc_ent *prev;	/* LRU list, towards most recent */
+    struct fhc_ent *next;	/* LRU list, towards least recent */
+} fhc_ent;
 
-static unfs3_cache_t fh_cache[CACHE_ENTRIES];
+unsigned int opt_fh_cache_size = FH_CACHE_DEFAULT_SIZE;
+int opt_fh_cache_learn = FALSE;
+
+static fhc_ent **fhc_hash = NULL;
+static unsigned int fhc_buckets = 0;	/* power of two */
+static unsigned int fhc_count = 0;
+static fhc_ent *lru_head = NULL;	/* most recently used */
+static fhc_ent *lru_tail = NULL;	/* least recently used */
+
+/*
+ * entry returned by the last lookup or add
+ *
+ * this entry must not be evicted before the next lookup, because
+ * operations such as CREATE may still be needing the path inside the
+ * entry for getting directory attributes
+ */
+static fhc_ent *fhc_pinned = NULL;
 
 /* statistics */
 int fh_cache_max = 0;
 int fh_cache_use = 0;
 int fh_cache_hit = 0;
 
-/* counter for LRU */
-static unsigned int fh_cache_time = 0;
-
-/*
- * last returned entry
- *
- * this entry must not be overwritten before the next lookup, because
- * operations such as CREATE may still be needing the path inside the
- * entry for getting directory attributes
- *
- * this is needed since fh_cache_time can roll around to 0, thus
- * making the entry evictable
- */
-static int fh_last_entry = -1;
-
-/*
- * return next pseudo-time value for LRU counter
- */
-static unsigned int fh_cache_next(void)
+static unsigned int fhc_bucket(uint32 dev, uint64 ino)
 {
-    return ++fh_cache_time;
+    uint64 h = ino ^ (ino >> 29) ^ ((uint64) dev * 0x9E3779B97F4A7C15ULL);
+
+    h ^= h >> 32;
+    return (unsigned int) h & (fhc_buckets - 1);
 }
 
 /*
@@ -71,131 +84,200 @@ static unsigned int fh_cache_next(void)
  */
 void fh_cache_init(void)
 {
-    memset(fh_cache, 0, sizeof(unfs3_cache_t) * CACHE_ENTRIES);
+    unsigned int want = opt_fh_cache_size < 16 ? 16 : opt_fh_cache_size;
+
+    fhc_buckets = 16;
+    while (fhc_buckets < want && fhc_buckets < (1U << 30))
+        fhc_buckets <<= 1;
+
+    fhc_hash = calloc(fhc_buckets, sizeof(fhc_ent *));
+    if (!fhc_hash) {
+        logmsg(LOG_CRIT, "Unable to allocate file handle cache (%u entries)",
+               opt_fh_cache_size);
+        daemon_exit(0);
+    }
+}
+
+static void lru_unlink(fhc_ent * e)
+{
+    if (e->prev)
+        e->prev->next = e->next;
+    else
+        lru_head = e->next;
+    if (e->next)
+        e->next->prev = e->prev;
+    else
+        lru_tail = e->prev;
+    e->prev = e->next = NULL;
+}
+
+static void lru_push_front(fhc_ent * e)
+{
+    e->prev = NULL;
+    e->next = lru_head;
+    if (lru_head)
+        lru_head->prev = e;
+    lru_head = e;
+    if (!lru_tail)
+        lru_tail = e;
+}
+
+static void lru_touch(fhc_ent * e)
+{
+    if (e != lru_head) {
+        lru_unlink(e);
+        lru_push_front(e);
+    }
 }
 
 /*
- * find cache index to use for new entry
- * returns either an empty slot or the least recently used slot if no
- * empty slot is present
+ * find entry given device and inode number
  */
-static int fh_cache_lru(void)
+static fhc_ent *fhc_find(uint32 dev, uint64 ino)
 {
-    unsigned int best = UINT_MAX;
-    int best_idx = 0;
-    int i;
+    fhc_ent *e;
 
-    /* if cache is not full, we simply hand out the next slot */
-    if (fh_cache_max < CACHE_ENTRIES - 1)
-        return fh_cache_max++;
+    for (e = fhc_hash[fhc_bucket(dev, ino)]; e; e = e->hnext)
+        if (e->dev == dev && e->ino == ino)
+            return e;
+    return NULL;
+}
 
-    for (i = 0; i < CACHE_ENTRIES; i++) {
-        if (i == fh_last_entry)
-            continue;
-        if (fh_cache[i].use == 0)
-            return i;
-        if (fh_cache[i].use < best) {
-            best = fh_cache[i].use;
-            best_idx = i;
+/*
+ * remove (free) a cache entry
+ */
+static void fhc_remove(fhc_ent * e)
+{
+    fhc_ent **pp = &fhc_hash[fhc_bucket(e->dev, e->ino)];
+
+    while (*pp && *pp != e)
+        pp = &(*pp)->hnext;
+    if (*pp)
+        *pp = e->hnext;
+    lru_unlink(e);
+    if (fhc_pinned == e)
+        fhc_pinned = NULL;
+    free(e->path);
+    free(e);
+    fhc_count--;
+}
+
+/*
+ * evict the least recently used entry, never the pinned one
+ */
+static void fhc_evict(void)
+{
+    fhc_ent *victim = lru_tail;
+
+    if (victim && victim == fhc_pinned)
+        victim = victim->prev;
+    if (victim)
+        fhc_remove(victim);
+}
+
+static char *fhc_add(uint32 dev, uint64 ino, const char *path, int pin)
+{
+    fhc_ent *e;
+    char *copy;
+    unsigned int b;
+
+    e = fhc_find(dev, ino);
+    if (e) {
+        /* if we already have a matching entry, update that */
+        if (e->path != path && strcmp(e->path, path) != 0) {
+            copy = strdup(path);
+            if (!copy)
+                return NULL;
+            free(e->path);
+            e->path = copy;
         }
+        lru_touch(e);
+    } else {
+        /* otherwise make room by evicting the least recently used entry */
+        while (fhc_count >= opt_fh_cache_size && fhc_count > 1)
+            fhc_evict();
+
+        e = malloc(sizeof(fhc_ent));
+        copy = strdup(path);
+        if (!e || !copy) {
+            free(e);
+            free(copy);
+            return NULL;
+        }
+        e->dev = dev;
+        e->ino = ino;
+        e->path = copy;
+        b = fhc_bucket(dev, ino);
+        e->hnext = fhc_hash[b];
+        fhc_hash[b] = e;
+        lru_push_front(e);
+        fhc_count++;
+        if ((int) fhc_count > fh_cache_max)
+            fh_cache_max = fhc_count;
     }
 
-    /* avoid stomping over last returned entry */
-    if (best_idx == 0 && fh_last_entry == 0)
-        best_idx = 1;
-
-    return best_idx;
-}
-
-/*
- * invalidate (clear) a cache entry
- */
-static void fh_cache_inval(int idx)
-{
-    fh_cache[idx].dev = 0;
-    fh_cache[idx].ino = 0;
-    fh_cache[idx].use = 0;
-    fh_cache[idx].path[0] = 0;
-}
-
-/*
- * find index given device and inode number
- */
-static int fh_cache_index(uint32 dev, uint64 ino)
-{
-    int i, res = -1;
-
-    for (i = 0; i < fh_cache_max + 1; i++)
-        if (fh_cache[i].dev == dev && fh_cache[i].ino == ino) {
-            res = i;
-            break;
-        }
-
-    return res;
+    if (pin)
+        fhc_pinned = e;
+    return e->path;
 }
 
 /*
  * add an entry to the filehandle cache
+ *
+ * returns a pointer to the cached copy of the path, which stays valid
+ * until the next cache lookup or add
  */
 char *fh_cache_add(uint32 dev, uint64 ino, const char *path)
 {
-    int idx;
+    char *res = fhc_add(dev, ino, path, TRUE);
 
-    /* if we already have a matching entry, overwrite that */
-    idx = fh_cache_index(dev, ino);
-
-    /* otherwise overwrite least recently used entry */
-    if (idx == -1)
-        idx = fh_cache_lru();
-
-    fh_cache[idx].dev = dev;
-    fh_cache[idx].ino = ino;
-    fh_cache[idx].use = fh_cache_next();
-
-    strcpy(fh_cache[idx].path, path);
-
-    return fh_cache[idx].path;
+    /* on allocation failure, fall back to the caller's string */
+    return res ? res : (char *) path;
 }
 
 /*
- * lookup an entry in the cache given a device, inode, and generation number
+ * add an entry learned from a directory listing (-L); does not change
+ * which entry is pinned, so the directory being read stays valid
+ */
+void fh_cache_learn(uint32 dev, uint64 ino, const char *path)
+{
+    if (opt_fh_cache_learn)
+        (void) fhc_add(dev, ino, path, FALSE);
+}
+
+/*
+ * lookup an entry in the cache given a device and inode number
  */
 static char *fh_cache_lookup(uint32 dev, uint64 ino)
 {
-    int i, res;
+    int res;
+    fhc_ent *e;
     backend_statstruct buf;
 
-    i = fh_cache_index(dev, ino);
+    e = fhc_find(dev, ino);
+    if (!e)
+        return NULL;
 
-    if (i != -1) {
-        /* check whether path to <dev,ino> relation still holds */
-        res = backend_lstat(fh_cache[i].path, &buf);
-        if (res == -1) {
-            /* object does not exist any more */
-            fh_cache_inval(i);
-            return NULL;
-        }
-        if (buf.st_dev == dev && buf.st_ino == ino) {
-            /* cache hit, update time on cache entry */
-            fh_cache[i].use = fh_cache_next();
-
-            /* update stat cache */
-            fix_dir_times(fh_cache[i].path, &buf);
-            st_cache_valid = TRUE;
-            st_cache = buf;
-
-            /* prevent next fh_cache_add from overwriting entry */
-            fh_last_entry = i;
-
-            return fh_cache[i].path;
-        } else {
-            /* path to <dev,ino> relation has changed */
-            fh_cache_inval(i);
-            return NULL;
-        }
+    /* check whether path to <dev,ino> relation still holds */
+    res = backend_lstat(e->path, &buf);
+    if (res == -1 || buf.st_dev != dev || buf.st_ino != ino) {
+        /* object does not exist any more, or relation has changed */
+        fhc_remove(e);
+        return NULL;
     }
 
-    return NULL;
+    /* cache hit, mark entry as most recently used */
+    lru_touch(e);
+
+    /* update stat cache */
+    fix_dir_times(e->path, &buf);
+    st_cache_valid = TRUE;
+    st_cache = buf;
+
+    /* prevent the next fh_cache_add from evicting the entry */
+    fhc_pinned = e;
+
+    return e->path;
 }
 
 /*
