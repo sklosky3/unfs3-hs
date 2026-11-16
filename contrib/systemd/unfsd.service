@@ -1,0 +1,17 @@
+[Unit]
+Description=UNFS3 user-space NFSv3 server
+Documentation=man:unfsd(8)
+# If exports are CIFS mounts, order this unit after them, for example:
+#   RequiresMountsFor=/export/share
+After=network-online.target remote-fs.target rpcbind.service
+Wants=network-online.target rpcbind.service
+
+[Service]
+Type=forking
+EnvironmentFile=-/etc/sysconfig/unfsd
+PIDFile=/run/unfsd.pid
+ExecStart=/usr/sbin/unfsd -i /run/unfsd.pid $UNFSD_OPTS
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

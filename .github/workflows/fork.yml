@@ -1,0 +1,47 @@
+name: Fork checks
+
+on: [push, pull_request]
+
+jobs:
+  cifs-nlink-test:
+    # Samba + kernel CIFS client + unfsd + kernel NFS client in a privileged
+    # Rocky Linux 9 container. Needs the cifs, nfs and nfsd filesystems on the
+    # runner's kernel.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load kernel modules
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y "linux-modules-extra-$(uname -r)" || true
+          sudo modprobe cifs || true
+          sudo modprobe nfs || true
+          sudo modprobe nfsd || true
+          grep -E 'cifs|nfs' /proc/filesystems
+      - name: Run test
+        run: tests/cifs-nlink/run.sh
+
+  rpm-rocky9:
+    runs-on: ubuntu-latest
+    container: rockylinux:9
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: dnf -y --enablerepo=crb install gcc make autoconf automake flex bison libtirpc-devel rpm-build git
+      - name: Build tarball
+        run: |
+          # autoconf 2.69 on Rocky 9 does not install these aux files itself
+          cp /usr/share/automake-*/{install-sh,config.sub,config.guess} .
+          ./bootstrap
+          ./configure
+          make dist
+      - name: Build RPM
+        run: |
+          mkdir -p ~/rpmbuild/SOURCES
+          cp unfs3-*.tar.gz ~/rpmbuild/SOURCES/
+          rpmbuild -bb unfs3.spec
+          cp ~/rpmbuild/RPMS/*/unfs3-*.rpm .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: RPM (Rocky Linux 9)
+          path: unfs3-*.rpm

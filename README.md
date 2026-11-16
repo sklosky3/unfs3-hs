@@ -1,4 +1,14 @@
-# UNFS3, a User-Space NFSv3 Server
+# UNFS3, a User-Space NFSv3 Server (fork)
+
+> **This is a fork of [unfs3/unfs3](https://github.com/unfs3/unfs3)** for
+> re-exporting a Linux CIFS (SMB) mount over NFSv3, for example so that
+> migration tools can read an SMB-only file server through NFS. It adds a
+> minimal READDIRPLUS and a hard link count correction for CIFS exports
+> (`-N`). See [HAMMERSPACE-CHANGES.md](HAMMERSPACE-CHANGES.md) for what
+> changed, the recommended proxy setup and known limitations, and
+> `tests/cifs-nlink/` for the regression test. The upstream README follows
+> unchanged; where it says READDIRPLUS is unsupported, this fork returns
+> names and fileids without attributes or handles.
 
 (C) 2003-2025, various authors
 

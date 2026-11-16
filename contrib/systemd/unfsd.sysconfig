@@ -1,0 +1,5 @@
+# Options for unfsd (see unfsd(8)).
+#   -t        TCP only
+#   -N auto   correct hard link counts on CIFS/SMB3 exports (default)
+#   -e FILE   exports file
+UNFSD_OPTS="-t -N auto -e /etc/exports.unfsd"

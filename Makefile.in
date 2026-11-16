@@ -105,6 +105,7 @@ unfs3-$(VERSION).tar.gz:
 	 unfs3-$(VERSION)/Extras/cluster.c \
 	 unfs3-$(VERSION)/Extras/cluster.h \
 	 unfs3-$(VERSION)/Extras/tags.7 \
+	 unfs3-$(VERSION)/HAMMERSPACE-CHANGES.md \
 	 unfs3-$(VERSION)/LICENSE \
 	 unfs3-$(VERSION)/Makefile.in \
 	 unfs3-$(VERSION)/NEWS \
@@ -125,6 +126,8 @@ unfs3-$(VERSION).tar.gz:
 	 unfs3-$(VERSION)/config.sub \
 	 unfs3-$(VERSION)/configure \
 	 unfs3-$(VERSION)/configure.ac \
+	 unfs3-$(VERSION)/contrib/systemd/unfsd.service \
+ unfs3-$(VERSION)/contrib/systemd/unfsd.sysconfig \
 	 unfs3-$(VERSION)/contrib/nfsotpclient/README \
 	 unfs3-$(VERSION)/contrib/nfsotpclient/mountclient/__init__.py \
 	 unfs3-$(VERSION)/contrib/nfsotpclient/mountclient/mountconstants.py \
