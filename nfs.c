@@ -963,19 +963,54 @@ READDIR3res *nfsproc3_readdir_3_svc(READDIR3args * argp,
     return &result;
 }
 
-READDIRPLUS3res *nfsproc3_readdirplus_3_svc(U(READDIRPLUS3args * argp),
-        U(struct svc_req * rqstp))
+/*
+ * LAB PATCH (not upstream): minimal READDIRPLUS.
+ * Returns names, fileids and cookies from read_dir(), but no per-entry
+ * attributes and no file handles (both are optional in RFC 1813). Clients
+ * that need them must follow up with LOOKUP.
+ */
+#define RDP_MAX_ENTRIES 143
+READDIRPLUS3res *nfsproc3_readdirplus_3_svc(READDIRPLUS3args * argp,
+        struct svc_req * rqstp)
 {
     static READDIRPLUS3res result;
+    static entryplus3 plus[RDP_MAX_ENTRIES];
+    READDIR3res rd;
+    entry3 *e;
+    char *path;
+    count3 count;
+    int i = 0;
 
-    /*
-     * we don't do READDIRPLUS since it involves filehandle and
-     * attribute getting which is impossible to do atomically
-     * from user-space
-     */
-    result.status = NFS3ERR_NOTSUPP;
-    result.READDIRPLUS3res_u.resfail.dir_attributes.attributes_follow = FALSE;
+    memset(&result, 0, sizeof(result));
+    PREP(path, argp->dir);
 
+    /* leave room for the extra 8 bytes per entry of entryplus3 */
+    count = argp->dircount < argp->maxcount ? argp->dircount : argp->maxcount;
+    count = (count / 4) * 3;
+
+    rd = read_dir(path, argp->cookie, argp->cookieverf, count);
+    result.status = rd.status;
+
+    if (rd.status != NFS3_OK) {
+        result.READDIRPLUS3res_u.resfail.dir_attributes = get_post_stat(path, rqstp);
+        return &result;
+    }
+
+    for (e = rd.READDIR3res_u.resok.reply.entries; e && i < RDP_MAX_ENTRIES; e = e->nextentry, i++) {
+        plus[i].fileid = e->fileid;
+        plus[i].name = e->name;
+        plus[i].cookie = e->cookie;
+        plus[i].name_attributes.attributes_follow = FALSE;
+        plus[i].name_handle.handle_follows = FALSE;
+        plus[i].nextentry = NULL;
+        if (i > 0)
+            plus[i - 1].nextentry = &plus[i];
+    }
+
+    memcpy(result.READDIRPLUS3res_u.resok.cookieverf, rd.READDIR3res_u.resok.cookieverf, NFS3_COOKIEVERFSIZE);
+    result.READDIRPLUS3res_u.resok.reply.entries = i ? &plus[0] : NULL;
+    result.READDIRPLUS3res_u.resok.reply.eof = (e == NULL) ? rd.READDIR3res_u.resok.reply.eof : FALSE;
+    result.READDIRPLUS3res_u.resok.dir_attributes = get_post_stat(path, rqstp);
     return &result;
 }
 
