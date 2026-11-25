@@ -4,7 +4,7 @@
 > re-exporting a Linux CIFS (SMB) mount over NFSv3, for example so that
 > migration tools can read an SMB-only file server through NFS. It adds a
 > minimal READDIRPLUS, a hard link count correction for CIFS exports
-> (`-N`) and a larger, configurable file handle cache (`-H`, `-L`). See [HAMMERSPACE-CHANGES.md](HAMMERSPACE-CHANGES.md) for what
+> (`-N`), a larger, configurable file handle cache (`-H`, `-L`) and file handles that survive a remount (`-S`). See [HAMMERSPACE-CHANGES.md](HAMMERSPACE-CHANGES.md) for what
 > changed, the recommended proxy setup and known limitations, and
 > `tests/cifs-nlink/` for the regression test. The upstream README follows
 > unchanged; where it says READDIRPLUS is unsupported, this fork returns

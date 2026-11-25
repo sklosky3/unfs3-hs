@@ -300,7 +300,7 @@ static void check_duplicate_cifs_mounts(void)
 static void parse_options(int argc, char **argv)
 {
     int opt = 0;
-    char *optstring = "3bcC:de:hH:l:Lm:n:N:prstTuwi:";
+    char *optstring = "3bcC:de:hH:l:Lm:n:N:prsS:tTuwi:";
 
 #if defined(WIN32) || defined(AFS_SUPPORT)
     /* Allways truncate to 32 bits in these cases */
@@ -354,6 +354,7 @@ static void parse_options(int argc, char **argv)
                 printf("\t-H <entries> file handle cache size (default %d)\n", FH_CACHE_DEFAULT_SIZE);
                 printf("\t-L          also cache names returned by directory listings\n");
                 printf("\t-N <mode>   hard link count correction on CIFS exports: auto (default), always, never\n");
+                printf("\t-S <spec>   stable filesystem IDs in file handles: auto (CIFS mounts) or /mountpoint=<id>\n");
                 printf("\t-n <port>   port to use for NFS service\n");
                 printf("\t-m <port>   port to use for MOUNT service\n");
                 printf
@@ -420,6 +421,20 @@ static void parse_options(int argc, char **argv)
                     exit(1);
                 }
                 break;
+
+            case 'S':
+#ifdef __linux__
+                if (strcmp(optarg, "auto") == 0)
+                    sfsid_enable_auto();
+                else if (sfsid_add_manual(optarg) != 0) {
+                    fprintf(stderr, "-S needs auto or /mountpoint=<id below 0x40000000>\n");
+                    exit(1);
+                }
+                break;
+#else
+                fprintf(stderr, "-S is only supported on Linux\n");
+                exit(1);
+#endif
 
             case 'n':
                 opt_nfs_port = strtol(optarg, NULL, 10);

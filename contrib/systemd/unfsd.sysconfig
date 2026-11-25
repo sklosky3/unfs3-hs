@@ -1,7 +1,8 @@
 # Options for unfsd (see unfsd(8)).
 #   -t        TCP only
 #   -N auto   correct hard link counts on CIFS/SMB3 exports (default)
+#   -S auto   file handles that survive a reboot or remount of CIFS shares
 #   -H N      file handle cache entries (about 130 MB per million)
 #   -L        also cache names from directory listings
 #   -e FILE   exports file
-UNFSD_OPTS="-t -N auto -H 1000000 -L -e /etc/exports.unfsd"
+UNFSD_OPTS="-t -N auto -H 1000000 -L -S auto -e /etc/exports.unfsd"

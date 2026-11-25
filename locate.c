@@ -128,7 +128,7 @@ char *locate_file(U(uint32 dev), U(uint64 ino))
      * look for mtab entry with matching device
      */
     while ((ent = getmntent(mtab))) {
-        res = lstat(ent->mnt_dir, &buf);
+        res = backend_lstat(ent->mnt_dir, &buf);
 
         if (res == 0 && buf.st_dev == dev)
             break;
@@ -152,7 +152,7 @@ char *locate_file(U(uint32 dev), U(uint64 ino))
      * look for mnttab entry with matching device
      */
     while (getmntent(mtab, &ent) == 0) {
-        res = lstat(ent.mnt_mountp, &buf);
+        res = backend_lstat(ent.mnt_mountp, &buf);
 
         if (res == 0 && buf.st_dev == dev) {
             found = TRUE;
