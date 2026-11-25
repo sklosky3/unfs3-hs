@@ -2,12 +2,20 @@
 """Minimal NFSv3/MOUNT client over TCP that works with raw file handles, as a client that stored them would.
 nfs3fh.py PORT mnt <export>        print the root handle (hex)
 nfs3fh.py PORT lookup <fh> <name>  print the child's handle
-nfs3fh.py PORT getattr <fh>        print "status fsid fileid" """
-import socket, struct, sys
+nfs3fh.py PORT getattr <fh>        print "status fsid fileid"
+nfs3fh.py PORT read <fh>           print the NFS status of reading the first bytes"""
+import os, socket, struct, sys
 
 def call(port, prog, proc, body):
-    # AUTH_SYS credential (stamp, empty machine name, uid 0, gid 0, no groups), empty verifier
-    msg = struct.pack(">IIIIII", 1, 0, 2, prog, 3, proc) + struct.pack(">II", 1, 20) + struct.pack(">IIIII", 0, 0, 0, 0, 0) + struct.pack(">II", 0, 0) + body
+    # NFS3_AUTH: "sys:<uid>:<gid>[:<gid>,...]" (default sys:0:0) or "none"; empty verifier
+    auth = os.environ.get("NFS3_AUTH", "sys:0:0").split(":")
+    if auth[0] == "none":
+        cred = struct.pack(">II", 0, 0)
+    else:
+        gids = [int(g) for g in auth[3].split(",")] if len(auth) > 3 else []
+        c = struct.pack(">IIIII", 0, 0, int(auth[1]), int(auth[2]), len(gids)) + b"".join(struct.pack(">I", g) for g in gids)
+        cred = struct.pack(">II", 1, len(c)) + c
+    msg = struct.pack(">IIIIII", 1, 0, 2, prog, 3, proc) + cred + struct.pack(">II", 0, 0) + body
     with socket.create_connection(("127.0.0.1", port), timeout=20) as s:
         s.sendall(struct.pack(">I", 0x80000000 | len(msg)) + msg)
         data = b""
@@ -36,6 +44,9 @@ if op in ("mnt", "lookup"):
     if st:
         sys.exit(f"status {st}")
     print(r[8:8 + n].hex())
+elif op == "read":
+    r = call(port, 100003, 6, opaque(bytes.fromhex(sys.argv[3])) + struct.pack(">QI", 0, 64))
+    print(struct.unpack(">I", r[:4])[0])
 else:
     r = call(port, 100003, 1, opaque(bytes.fromhex(sys.argv[3])))
     st = struct.unpack(">I", r[:4])[0]

@@ -114,6 +114,16 @@ Notes:
 Test: `tests/stable-fsid/run.sh` (mounts two shares in a different order
 between restarts and resolves handles stored before the restart).
 
+## 5. Crash on requests without a Unix credential
+
+An NFS request sent with AUTH_NONE made unfsd (running as root) dereference a
+missing credential while switching supplementary groups, and exit with a
+segmentation fault. One request from any client allowed by the exports file was
+enough. Such requests now run as the anonymous user with no supplementary
+groups.
+
+Test: `tests/auth-none/run.sh`.
+
 ## Recommended proxy setup
 
 ```
