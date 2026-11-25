@@ -45,9 +45,15 @@ extern int opt_detach;
 void logmsg(int prio, const char *fmt, ...);
 
 static int sfsid_auto = 0;
-static struct { char dir[PATH_MAX]; unsigned int id; } manual[SFSID_MAX];
+static struct {
+    char dir[PATH_MAX];
+    unsigned int id;
+} manual[SFSID_MAX];
 static int nmanual = 0;
-static struct { dev_t dev; unsigned int id; } map[SFSID_MAX];
+static struct {
+    dev_t dev;
+    unsigned int id;
+} map[SFSID_MAX];
 static int nmap = 0;
 static int mounts_fd = -1;
 static int loaded = 0;
