@@ -57,6 +57,7 @@ static struct {
 static int nmap = 0;
 static int mounts_fd = -1;
 static int loaded = 0;
+static int check_mounts = 1;
 
 void sfsid_enable_auto(void)
 {
@@ -204,13 +205,23 @@ static void translate(struct stat *buf)
 
     if (!sfsid_auto && nmanual == 0)
         return;
-    if (mounts_changed() || !loaded)
-        load_mounts();
+    /* one poll() per request, not per stat: a tree walk stats thousands
+       of entries within a single request */
+    if (check_mounts || !loaded) {
+        check_mounts = 0;
+        if (mounts_changed() || !loaded)
+            load_mounts();
+    }
     for (i = 0; i < nmap; i++)
         if (map[i].dev == buf->st_dev) {
             buf->st_dev = map[i].id;
             return;
         }
+}
+
+void sfsid_new_request(void)
+{
+    check_mounts = 1;
 }
 
 int sfsid_stat(const char *path, struct stat *buf)

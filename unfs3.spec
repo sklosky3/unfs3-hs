@@ -3,7 +3,7 @@ Summary: UNFS3 user-space NFSv3 server
 Group: Applications/System
 Name: unfs3
 Version: %{version}
-Release: 1.hs2
+Release: 1.hs3
 License: BSD
 Packager: Pascal Schmidt <unfs3-server@ewetel.net>
 Vendor: none

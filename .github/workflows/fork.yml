@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        test: [cifs-nlink, fh-cache, stable-fsid, auth-none]
+        test: [cifs-nlink, fh-cache, stable-fsid, auth-none, miss-walk]
     name: test-${{ matrix.test }}
     steps:
       - uses: actions/checkout@v4

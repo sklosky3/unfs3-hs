@@ -15,6 +15,9 @@ void sfsid_enable_auto(void);
 /* -S <mountpoint>=<id>: set the ID of one mounted filesystem; 0 on success */
 int sfsid_add_manual(const char *spec);
 
+/* call once per request: the next stat checks whether the mounts changed */
+void sfsid_new_request(void);
+
 /* stat family with st_dev replaced by the stable ID, where one applies */
 int sfsid_stat(const char *path, struct stat *buf);
 int sfsid_lstat(const char *path, struct stat *buf);

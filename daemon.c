@@ -562,6 +562,10 @@ static void nfs3_program_3(struct svc_req *rqstp, register SVCXPRT * transp)
     xdrproc_t _xdr_argument, _xdr_result;
     char *(*local) (char *, struct svc_req *);
 
+#ifdef __linux__
+    sfsid_new_request();
+#endif
+
     switch (rqstp->rq_proc) {
         case NFSPROC3_NULL:
             _xdr_argument = (xdrproc_t) xdr_void;
@@ -749,6 +753,10 @@ static void mountprog_3(struct svc_req *rqstp, register SVCXPRT * transp)
     char *result;
     xdrproc_t _xdr_argument, _xdr_result;
     char *(*local) (char *, struct svc_req *);
+
+#ifdef __linux__
+    sfsid_new_request();
+#endif
 
     switch (rqstp->rq_proc) {
         case MOUNTPROC_NULL:
