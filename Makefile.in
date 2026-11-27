@@ -6,10 +6,10 @@ VERSION = @PACKAGE_VERSION@
 RM = rm -f
 MAKE = make
 
-SOURCES = afsgettimes.c afssupport.c attr.c daemon.c error.c fd_cache.c fh.c fh_cache.c locate.c \
+SOURCES = stable_fsid.c afsgettimes.c afssupport.c attr.c daemon.c error.c fd_cache.c fh.c fh_cache.c locate.c \
           md5.c mount.c nfs.c password.c readdir.c user.c xdr.c winsupport.c
 OBJS = afsgettimes.o afssupport.o attr.o daemon.o error.o fd_cache.o fh.o fh_cache.o locate.o \
-       md5.o mount.o nfs.o password.o readdir.o user.o xdr.o winsupport.o
+       md5.o mount.o nfs.o password.o readdir.o user.o xdr.o winsupport.o stable_fsid.o
 CONFOBJ = Config/lib.a
 EXTRAOBJ = @EXTRAOBJ@
 LDFLAGS = @LDFLAGS@ @LIBS@ @AFS_LIBS@ @TIRPC_LIBS@
@@ -165,6 +165,8 @@ unfs3-$(VERSION).tar.gz:
 	 unfs3-$(VERSION)/password.h \
 	 unfs3-$(VERSION)/readdir.c \
 	 unfs3-$(VERSION)/readdir.h \
+	 unfs3-$(VERSION)/stable_fsid.c \
+	 unfs3-$(VERSION)/stable_fsid.h \
 	 unfs3-$(VERSION)/unfs3.spec \
 	 unfs3-$(VERSION)/unfsd.8 \
 	 unfs3-$(VERSION)/unfsd.init \

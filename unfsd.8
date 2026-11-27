@@ -109,6 +109,17 @@ handle, such as backup, migration and assimilation tools. Use it together
 with a large
 .BR \-H .
 .TP
+.BI "\-S " "\<spec\>"
+Stable filesystem IDs (Linux only). File handles and the NFS fsid contain the
+device number of the exported filesystem, which for CIFS and other virtual
+filesystems can change when it is mounted again. With
+.B "\-S auto"
+unfsd uses an ID derived from the server path of each CIFS or SMB3 mount.
+With
+.BI "\-S " /mountpoint=id
+it uses the given ID (below 0x40000000) for that mounted filesystem; the option
+may be repeated. Changing this setting changes existing file handles.
+.TP
 .BI "\-N " "\<mode\>"
 Hard link count correction (Linux only). The Linux CIFS client reports a
 link count of 1 for files it learned about from a directory listing, so

@@ -175,6 +175,11 @@ static int switch_groups(struct svc_req *req)
     struct authunix_parms *auth = (struct authunix_parms *) req->rq_clntcred;
     unsigned int i, max;
 
+    /* AUTH_NONE and other flavors carry no group list (rq_clntcred is not an
+       authunix_parms): drop the previous request's supplementary groups */
+    if (req->rq_cred.oa_flavor != AUTH_UNIX)
+        return backend_setgroups(0, NULL);
+
     max = (auth->aup_len <= 32) ? auth->aup_len : 32;
 
     for (i = 0; i < max; ++i) {

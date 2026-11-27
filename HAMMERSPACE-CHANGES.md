@@ -82,12 +82,54 @@ tree, not a benchmark.
 Sizing: one entry per file the client works on at a time. 1,000,000
 entries take roughly 130 MB with typical path lengths.
 
+## 4. Stable filesystem IDs (`-S`)
+
+Linux only. unfsd puts the device number (`st_dev`) of the exported
+filesystem into every file handle and reports it as the NFS `fsid`. A CIFS
+mount gets an anonymous device number when it is mounted, so the number
+depends on mount order. After a gateway reboot it can differ, every stored
+file handle becomes stale, and a client such as Hammerspace marks the volume
+unavailable ("wrong root filehandle"). Seen in an OCI test on 2026-11-25.
+
+- `-S auto`: for every CIFS/SMB3 mount, use an ID hashed from the server
+  path (lower-cased) and the mounted subtree instead of the device number.
+- `-S /mountpoint=<id>`: set the ID for one mounted filesystem (any type);
+  may be repeated, and wins over `auto`.
+
+The mapping is applied to every `stat` result, so handles, caches, path
+resolution and attributes agree, and it follows remounts while unfsd runs.
+The log shows each mount's ID.
+
+Notes:
+
+- Turning `-S` on changes the file handles once. Enable it before clients
+  store handles (for Hammerspace: before the volume is added).
+- `auto` depends on the server path as mounted. Mounting the same share by IP
+  address on one boot and by name on another gives a different ID. Gateways
+  that mount the same path get the same ID; whether that is enough to fail
+  over between gateways has not been tested.
+- If two mounts would get the same ID, the second keeps its device number
+  and unfsd logs it.
+
+Test: `tests/stable-fsid/run.sh` (mounts two shares in a different order
+between restarts and resolves handles stored before the restart).
+
+## 5. Crash on requests without a Unix credential
+
+An NFS request sent with AUTH_NONE made unfsd (running as root) dereference a
+missing credential while switching supplementary groups, and exit with a
+segmentation fault. One request from any client allowed by the exports file was
+enough. Such requests now run as the anonymous user with no supplementary
+groups.
+
+Test: `tests/auth-none/run.sh`.
+
 ## Recommended proxy setup
 
 ```
 mount -t cifs //server/share /export/share \
     -o ro,vers=3.1.1,serverino,backupuid=0,backupgid=0,credentials=/etc/unfsd/share.cred
-unfsd -t -N auto -H 1000000 -L -e /etc/exports.unfsd
+unfsd -t -N auto -H 1000000 -L -S auto -e /etc/exports.unfsd
 ```
 
 - `serverino` is required: it makes the NFS fileid equal the SMB file ID.

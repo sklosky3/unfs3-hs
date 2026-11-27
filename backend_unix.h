@@ -80,6 +80,17 @@
 #define backend_lchown chown
 #endif
 
+#if defined(__linux__) && !defined(AFS_SUPPORT)
+/* st_dev goes into file handles: allow it to be replaced by a stable ID (-S) */
+#  include "stable_fsid.h"
+#  undef  backend_stat
+#  define backend_stat		sfsid_stat
+#  undef  backend_fstat
+#  define backend_fstat		sfsid_fstat
+#  undef  backend_lstat
+#  define backend_lstat		sfsid_lstat
+#endif
+
 #ifdef AFS_SUPPORT
 #  undef  backend_get_gen
 #  define backend_get_gen	afs_get_gen
