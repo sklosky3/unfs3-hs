@@ -39,6 +39,7 @@
 #include "attr.h"
 #include "backend.h"
 #include "Config/exports.h"
+#include "fh_cache.h"
 
 /*
  * hash function for inode numbers
@@ -371,6 +372,11 @@ post_op_fh3 fh_extend_type(nfs_fh3 fh, const char *path, unsigned int type)
  * pos:    position in filehandles path inode array
  * lead:   current directory for search
  * result: where to store path if seach is complete
+ *
+ * With -L, every name seen is added to the file handle cache, and the
+ * directory holding the object is read to its end. A client that holds many
+ * handles for one directory (after a restart, or after evictions) then costs
+ * one walk per directory instead of one walk per file.
  */
 static int fh_rec(const unfs3_fh_t * fh, int pos, const char *lead,
                   char *result)
@@ -405,6 +411,19 @@ static int fh_rec(const unfs3_fh_t * fh, int pos, const char *lead,
                 buf.st_dev = 0;
                 buf.st_ino = 0;
             }
+#ifndef WIN32
+            else if (strcmp(entry->d_name, "..") != 0 &&
+                     strcmp(entry->d_name, ".") != 0) {
+                /* same path format as result below; no-op without -L */
+                fh_cache_learn(buf.st_dev, buf.st_ino, obj + 1);
+            }
+
+            if (matches) {
+                /* only here with -L: caching the rest of the directory */
+                entry = backend_readdir(search);
+                continue;
+            }
+#endif
 
             if (buf.st_dev == fh->dev && buf.st_ino == fh->ino) {
                 /* found the object */
@@ -415,7 +434,10 @@ static int fh_rec(const unfs3_fh_t * fh, int pos, const char *lead,
                 st_cache = buf;
                 matches++;
 #ifndef WIN32
-                break;
+                if (!opt_fh_cache_learn)
+                    break;
+                entry = backend_readdir(search);
+                continue;
 #endif
             }
 

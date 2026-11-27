@@ -243,8 +243,16 @@ char *fh_cache_add(uint32 dev, uint64 ino, const char *path)
  */
 void fh_cache_learn(uint32 dev, uint64 ino, const char *path)
 {
-    if (opt_fh_cache_learn)
-        (void) fhc_add(dev, ino, path, FALSE);
+    fhc_ent *e;
+
+    if (!opt_fh_cache_learn)
+        return;
+    /* never replace the path a caller may still be holding (another name
+       of the same file would free it) */
+    e = fhc_find(dev, ino);
+    if (e && e == fhc_pinned)
+        return;
+    (void) fhc_add(dev, ino, path, FALSE);
 }
 
 /*

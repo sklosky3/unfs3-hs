@@ -63,8 +63,13 @@ and assimilation tools) misses on most files.
   eviction. Paths are stored at their real length (about 64 bytes plus
   the path per entry).
 - `-H <entries>`: cache size. Default 4096, as upstream.
-- `-L`: also cache every name returned by READDIR/READDIRPLUS. Use with a
-  large `-H`.
+- `-L`: also cache every name returned by READDIR/READDIRPLUS, and every
+  name seen while resolving an uncached handle. Use with a large `-H`.
+- With `-L`, the walk that resolves a miss reads the object's directory to
+  its end, so its siblings are cached too. This matters after a restart,
+  when the cache is empty and a client uses handles it stored earlier: it
+  costs one walk per directory instead of one walk per file. Without `-L`
+  the walk stops at the object, as upstream does.
 - At startup and on SIGHUP, unfsd logs a warning when one CIFS/SMB3 share
   is mounted more than once (same `//server/share` in `/proc/self/mounts`).
 - `SIGUSR1` logs cache statistics (entries, accesses, hits, misses), as
@@ -72,6 +77,25 @@ and assimilation tools) misses on most files.
 - Test: `tests/fh-cache/run.sh`. On 6,000 files read back in shuffled order
   after a listing: default cache 4,186 misses; `-H 100000 -L` 0 misses;
   `-H 16 -L` (eviction stress) all content correct.
+
+Handles stored before a restart (`tests/miss-walk/run.sh`: 4,001 files in
+20 directories, stored handles used in shuffled order after a restart):
+
+| Options after restart | Handle misses | `stat` calls | Time |
+|---|---|---|---|
+| `-H 100000 -L` | 20 | 12,411 | 8.6 s |
+| `-H 100000` | 4,000 | 492,003 | 46.1 s |
+
+Times are from one container run with `strace` attached, over a local CIFS
+mount; use them only to compare the two rows.
+
+The reason for the change: in an OCI test on 2026-11-26, restarting unfsd
+during a Hammerspace file access test (667,007 files, about 950 per
+directory, Windows SMB server) dropped the test to about 83 reads/s, with
+about 125,000 `stat` calls in 10 s. The same test with this change
+(build `1.hs3`, restart 120 s into the file access test) completed: about
+140 reads/s after the restart (about 150 before, limited by antivirus on
+the Windows server), 530 handle misses in total, about one per directory.
 
 Measured with a real Windows Server SMB share (about 20,000 files, 265
 directories) re-exported to an NFS assimilation client that lists the tree
@@ -97,8 +121,9 @@ unavailable ("wrong root filehandle"). Seen in an OCI test on 2026-11-25.
   may be repeated, and wins over `auto`.
 
 The mapping is applied to every `stat` result, so handles, caches, path
-resolution and attributes agree, and it follows remounts while unfsd runs.
-The log shows each mount's ID.
+resolution and attributes agree. unfsd checks for changed mounts once per
+request (at the first `stat`), so it follows remounts while it runs without
+a system call for every entry of a tree walk. The log shows each mount's ID.
 
 Notes:
 
@@ -148,8 +173,9 @@ unfsd -t -N auto -H 1000000 -L -S auto -e /etc/exports.unfsd
 ## Known limitations
 
 - unfsd is single-threaded; every NFS call waits on a CIFS round trip.
-- A cache miss is still resolved by a tree walk from `/`. On trees much
-  larger than the cache, misses stay expensive; a handle format that
+- A cache miss is still resolved by a tree walk from `/`. With `-L` one
+  walk covers a whole directory, but on trees much larger than the cache,
+  misses stay expensive; a handle format that
   records the parent directory would fix that and is under consideration.
 - NFSv3 only, no lock manager (clients mount with `nolock`).
 - Names that are valid on the SMB server but not addressable over SMB
